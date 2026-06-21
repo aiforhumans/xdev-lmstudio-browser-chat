@@ -272,7 +272,7 @@ function renderMessages() {
 
     const role = document.createElement("div");
     role.className = "message-role";
-    role.textContent = message.role;
+    role.textContent = message.role === "user" ? "You" : "Assistant";
 
     const content = document.createElement("div");
     content.className = "message-content";
@@ -408,6 +408,9 @@ function renderMemoryList(memories) {
     const top = document.createElement("div");
     top.className = "memory-top";
 
+    const meta = document.createElement("div");
+    meta.className = "memory-meta";
+
     const kind = document.createElement("span");
     kind.className = "memory-kind";
     kind.textContent = memory.kind || "fact";
@@ -416,8 +419,8 @@ function renderMemoryList(memories) {
     weight.className = "memory-weight";
     weight.textContent = `w:${Number(memory.weight || 0).toFixed(2)}`;
 
-    top.appendChild(kind);
-    top.appendChild(weight);
+    meta.appendChild(kind);
+    meta.appendChild(weight);
 
     const text = document.createElement("div");
     text.className = "memory-text";
@@ -442,9 +445,11 @@ function renderMemoryList(memories) {
       await loadMemoryList();
     });
 
+    top.appendChild(meta);
+    top.appendChild(forgetBtn);
+
     item.appendChild(top);
     item.appendChild(text);
-    item.appendChild(forgetBtn);
     memoryList.appendChild(item);
   }
 }
@@ -980,7 +985,7 @@ clearBtn.addEventListener("click", () => {
   conversation.responseIds = [];
   touchConversation(conversation);
   saveState();
-  renderMessages();
+  renderAll();
   setStatus("Chat cleared.", "ok");
 });
 

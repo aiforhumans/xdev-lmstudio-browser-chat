@@ -34,6 +34,25 @@
         </div>
       </header>
 
+      <section id="statusBox" class="status panel">Starting...</section>
+
+      <section id="chatBox" class="chat panel"></section>
+
+      <form id="chatForm" class="composer panel">
+        <textarea
+          id="messageInput"
+          placeholder="Type your message here..."
+          rows="3"
+        ></textarea>
+        <div class="composer-actions">
+          <button type="button" id="clearBtn">Clear</button>
+          <button type="button" id="regenerateBtn">Regenerate</button>
+          <button type="submit" id="sendBtn">Send</button>
+        </div>
+      </form>
+    </section>
+
+    <aside class="control-rail">
       <section class="settings panel">
         <label>
           Model
@@ -84,24 +103,7 @@
         </div>
         <div id="memoryList" class="memory-list"></div>
       </section>
-
-      <section id="statusBox" class="status panel">Starting...</section>
-
-      <section id="chatBox" class="chat panel"></section>
-
-      <form id="chatForm" class="composer panel">
-        <textarea
-          id="messageInput"
-          placeholder="Type your message here..."
-          rows="3"
-        ></textarea>
-        <div class="composer-actions">
-          <button type="button" id="clearBtn">Clear</button>
-          <button type="button" id="regenerateBtn">Regenerate</button>
-          <button type="submit" id="sendBtn">Send</button>
-        </div>
-      </form>
-    </section>
+    </aside>
   </main>
 
   <script src="/app.js"></script>
