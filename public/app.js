@@ -608,6 +608,7 @@ async function sendMessage(userText) {
     const decoder = new TextDecoder();
     let buffer = "";
     let finalMessage = "";
+    let finalReasoning = "";
     let finalResponseId = null;
     let streamError = null;
 
@@ -643,6 +644,14 @@ async function sendMessage(userText) {
         return;
       }
 
+      if (eventType === "reasoning.delta" || payload.type === "reasoning.delta") {
+        const delta = typeof payload.content === "string" ? payload.content : "";
+        if (delta) {
+          finalReasoning += delta;
+        }
+        return;
+      }
+
       if (eventType === "chat.end" || payload.type === "chat.end") {
         const result = payload.result || {};
         const output = Array.isArray(result.output) ? result.output : [];
@@ -650,9 +659,16 @@ async function sendMessage(userText) {
           .filter((item) => item?.type === "message" && typeof item?.content === "string")
           .map((item) => item.content)
           .join("");
+        const reasoningFromOutput = output
+          .filter((item) => item?.type === "reasoning" && typeof item?.content === "string")
+          .map((item) => item.content)
+          .join("");
 
-        if (!finalMessage && messageFromOutput) {
-          finalMessage = messageFromOutput;
+        if (!finalMessage) {
+          finalMessage = messageFromOutput || reasoningFromOutput || finalReasoning;
+        }
+
+        if (finalMessage) {
           conversation.messages[assistantDraftIndex].content = finalMessage;
           renderMessages();
         }
