@@ -388,78 +388,78 @@ function renderMessages() {
     chatBox.appendChild(wrapper);
   }
 
-  function renderMemoryList(memories) {
-    memoryList.innerHTML = "";
-    if (!Array.isArray(memories) || !memories.length) {
-      const empty = document.createElement("div");
-      empty.className = "memory-item empty";
-      empty.textContent = "No learned memory yet.";
-      memoryList.appendChild(empty);
-      return;
-    }
+  chatBox.scrollTop = chatBox.scrollHeight;
+}
 
-    for (const memory of memories) {
-      const item = document.createElement("div");
-      item.className = "memory-item";
-
-      const top = document.createElement("div");
-      top.className = "memory-top";
-
-      const kind = document.createElement("span");
-      kind.className = "memory-kind";
-      kind.textContent = memory.kind || "fact";
-
-      const weight = document.createElement("span");
-      weight.className = "memory-weight";
-      weight.textContent = `w:${Number(memory.weight || 0).toFixed(2)}`;
-
-      top.appendChild(kind);
-      top.appendChild(weight);
-
-      const text = document.createElement("div");
-      text.className = "memory-text";
-      text.textContent = memory.text || "";
-
-      const forgetBtn = document.createElement("button");
-      forgetBtn.type = "button";
-      forgetBtn.className = "secondary-btn";
-      forgetBtn.textContent = "Forget";
-      forgetBtn.addEventListener("click", async () => {
-        const response = await fetch("/api/memory/forget", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: memory.id }),
-        });
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          setStatus(`Memory error: ${data.error || "Could not forget"}`, "error");
-          return;
-        }
-        setStatus("Memory forgotten.", "ok");
-        await loadMemoryList();
-      });
-
-      item.appendChild(top);
-      item.appendChild(text);
-      item.appendChild(forgetBtn);
-      memoryList.appendChild(item);
-    }
+function renderMemoryList(memories) {
+  memoryList.innerHTML = "";
+  if (!Array.isArray(memories) || !memories.length) {
+    const empty = document.createElement("div");
+    empty.className = "memory-item empty";
+    empty.textContent = "No learned memory yet.";
+    memoryList.appendChild(empty);
+    return;
   }
 
-  async function loadMemoryList() {
-    try {
-      const response = await fetch("/api/memory/all");
+  for (const memory of memories) {
+    const item = document.createElement("div");
+    item.className = "memory-item";
+
+    const top = document.createElement("div");
+    top.className = "memory-top";
+
+    const kind = document.createElement("span");
+    kind.className = "memory-kind";
+    kind.textContent = memory.kind || "fact";
+
+    const weight = document.createElement("span");
+    weight.className = "memory-weight";
+    weight.textContent = `w:${Number(memory.weight || 0).toFixed(2)}`;
+
+    top.appendChild(kind);
+    top.appendChild(weight);
+
+    const text = document.createElement("div");
+    text.className = "memory-text";
+    text.textContent = memory.text || "";
+
+    const forgetBtn = document.createElement("button");
+    forgetBtn.type = "button";
+    forgetBtn.className = "secondary-btn";
+    forgetBtn.textContent = "Forget";
+    forgetBtn.addEventListener("click", async () => {
+      const response = await fetch("/api/memory/forget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: memory.id }),
+      });
       const data = await response.json();
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Could not load memory");
+        setStatus(`Memory error: ${data.error || "Could not forget"}`, "error");
+        return;
       }
-      renderMemoryList(data.memories || []);
-    } catch (error) {
-      setStatus(`Memory load error: ${error.message}`, "error");
-    }
-  }
+      setStatus("Memory forgotten.", "ok");
+      await loadMemoryList();
+    });
 
-  chatBox.scrollTop = chatBox.scrollHeight;
+    item.appendChild(top);
+    item.appendChild(text);
+    item.appendChild(forgetBtn);
+    memoryList.appendChild(item);
+  }
+}
+
+async function loadMemoryList() {
+  try {
+    const response = await fetch("/api/memory/all");
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Could not load memory");
+    }
+    renderMemoryList(data.memories || []);
+  } catch (error) {
+    setStatus(`Memory load error: ${error.message}`, "error");
+  }
 }
 
 function renderAll() {
@@ -527,7 +527,10 @@ async function loadModels() {
         conversation.model = data.defaultModel;
       }
       normalizeModelSelectionForConversation(conversation);
-      updateActiveConversationSettings();
+      modelSelect.value = conversation.model || availableModels[0].id;
+      conversation.model = modelSelect.value;
+      touchConversation(conversation);
+      saveState();
       renderAll();
     }
 
