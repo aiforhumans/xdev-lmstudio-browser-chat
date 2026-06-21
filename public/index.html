@@ -29,7 +29,9 @@
           <h1>XDEV LM Studio Chat</h1>
           <span class="subtitle">Local browser UI for LM Studio</span>
         </div>
-        <button id="checkConnectionBtn" type="button">Check API</button>
+        <div class="topbar-actions">
+          <button id="checkConnectionBtn" type="button">Check API</button>
+        </div>
       </header>
 
       <section class="settings panel">
@@ -73,6 +75,14 @@
         <button id="exportMdBtn" type="button">Export Markdown</button>
         <label class="import-label" for="importJsonInput">Import JSON</label>
         <input id="importJsonInput" type="file" accept="application/json" />
+      </section>
+
+      <section class="mind-panel panel">
+        <div class="mind-header">
+          <h3>Learned Memory</h3>
+          <button id="refreshMemoryBtn" type="button">Refresh</button>
+        </div>
+        <div id="memoryList" class="memory-list"></div>
       </section>
 
       <section id="statusBox" class="status panel">Starting...</section>

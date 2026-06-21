@@ -24,8 +24,11 @@ const deleteChatBtn = document.getElementById("deleteChatBtn");
 const exportJsonBtn = document.getElementById("exportJsonBtn");
 const exportMdBtn = document.getElementById("exportMdBtn");
 const importJsonInput = document.getElementById("importJsonInput");
+const refreshMemoryBtn = document.getElementById("refreshMemoryBtn");
+const memoryList = document.getElementById("memoryList");
 
 let availableModels = [];
+let isStreaming = false;
 
 const state = loadState();
 
@@ -262,7 +265,8 @@ function renderMessages() {
   const conversation = getActiveConversation();
   if (!conversation) return;
 
-  for (const message of conversation.messages) {
+  for (let index = 0; index < conversation.messages.length; index += 1) {
+    const message = conversation.messages[index];
     const wrapper = document.createElement("div");
     wrapper.className = `message ${message.role}`;
 
@@ -272,7 +276,22 @@ function renderMessages() {
 
     const content = document.createElement("div");
     content.className = "message-content";
-    renderMessageContent(content, message.content || "");
+    const isStreamingDraft =
+      isStreaming &&
+      message.role === "assistant" &&
+      !message.content &&
+      index === conversation.messages.length - 1;
+
+    if (isStreamingDraft) {
+      const typing = document.createElement("div");
+      typing.className = "typing-indicator";
+      for (let i = 0; i < 3; i += 1) {
+        typing.appendChild(document.createElement("span"));
+      }
+      content.appendChild(typing);
+    } else {
+      renderMessageContent(content, message.content || "");
+    }
 
     wrapper.appendChild(role);
     wrapper.appendChild(content);
@@ -290,11 +309,154 @@ function renderMessages() {
         setStatus("Response copied.", "ok");
       });
 
+      const goodBtn = document.createElement("button");
+      goodBtn.type = "button";
+      goodBtn.className = "secondary-btn";
+      goodBtn.textContent = "👍 Good";
+      goodBtn.addEventListener("click", async () => {
+        const previousUser = conversation.messages[index - 1]?.role === "user"
+          ? conversation.messages[index - 1].content
+          : "";
+        await fetch("/api/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: conversation.id,
+            messageIndex: index,
+            rating: "good",
+            userInput: previousUser,
+            assistantMessage: message.content || "",
+          }),
+        });
+        setStatus("Feedback saved: good.", "ok");
+        await loadMemoryList();
+      });
+
+      const badBtn = document.createElement("button");
+      badBtn.type = "button";
+      badBtn.className = "secondary-btn";
+      badBtn.textContent = "👎 Bad";
+      badBtn.addEventListener("click", async () => {
+        const previousUser = conversation.messages[index - 1]?.role === "user"
+          ? conversation.messages[index - 1].content
+          : "";
+        await fetch("/api/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: conversation.id,
+            messageIndex: index,
+            rating: "bad",
+            userInput: previousUser,
+            assistantMessage: message.content || "",
+          }),
+        });
+        setStatus("Feedback saved: bad.", "ok");
+      });
+
+      const rememberBtn = document.createElement("button");
+      rememberBtn.type = "button";
+      rememberBtn.className = "secondary-btn";
+      rememberBtn.textContent = "🧠 Remember";
+      rememberBtn.addEventListener("click", async () => {
+        const text = (message.content || "").trim();
+        if (!text) return;
+        const response = await fetch("/api/memory/remember", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: `Preferred answer style: ${text.slice(0, 280)}`,
+            kind: "rule",
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          setStatus(`Memory error: ${data.error || "Could not remember"}`, "error");
+          return;
+        }
+        setStatus("Saved to memory.", "ok");
+        await loadMemoryList();
+      });
+
       messageActions.appendChild(copyBtn);
+      messageActions.appendChild(goodBtn);
+      messageActions.appendChild(badBtn);
+      messageActions.appendChild(rememberBtn);
       wrapper.appendChild(messageActions);
     }
 
     chatBox.appendChild(wrapper);
+  }
+
+  function renderMemoryList(memories) {
+    memoryList.innerHTML = "";
+    if (!Array.isArray(memories) || !memories.length) {
+      const empty = document.createElement("div");
+      empty.className = "memory-item empty";
+      empty.textContent = "No learned memory yet.";
+      memoryList.appendChild(empty);
+      return;
+    }
+
+    for (const memory of memories) {
+      const item = document.createElement("div");
+      item.className = "memory-item";
+
+      const top = document.createElement("div");
+      top.className = "memory-top";
+
+      const kind = document.createElement("span");
+      kind.className = "memory-kind";
+      kind.textContent = memory.kind || "fact";
+
+      const weight = document.createElement("span");
+      weight.className = "memory-weight";
+      weight.textContent = `w:${Number(memory.weight || 0).toFixed(2)}`;
+
+      top.appendChild(kind);
+      top.appendChild(weight);
+
+      const text = document.createElement("div");
+      text.className = "memory-text";
+      text.textContent = memory.text || "";
+
+      const forgetBtn = document.createElement("button");
+      forgetBtn.type = "button";
+      forgetBtn.className = "secondary-btn";
+      forgetBtn.textContent = "Forget";
+      forgetBtn.addEventListener("click", async () => {
+        const response = await fetch("/api/memory/forget", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: memory.id }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          setStatus(`Memory error: ${data.error || "Could not forget"}`, "error");
+          return;
+        }
+        setStatus("Memory forgotten.", "ok");
+        await loadMemoryList();
+      });
+
+      item.appendChild(top);
+      item.appendChild(text);
+      item.appendChild(forgetBtn);
+      memoryList.appendChild(item);
+    }
+  }
+
+  async function loadMemoryList() {
+    try {
+      const response = await fetch("/api/memory/all");
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Could not load memory");
+      }
+      renderMemoryList(data.memories || []);
+    } catch (error) {
+      setStatus(`Memory load error: ${error.message}`, "error");
+    }
   }
 
   chatBox.scrollTop = chatBox.scrollHeight;
@@ -409,7 +571,9 @@ async function sendMessage(userText) {
   saveState();
   renderAll();
 
+  isStreaming = true;
   sendBtn.disabled = true;
+  sendBtn.textContent = "Streaming...";
   regenerateBtn.disabled = true;
   setStatus("Generating response...");
 
@@ -540,13 +704,16 @@ async function sendMessage(userText) {
     touchConversation(conversation);
     saveState();
     setStatus("Ready.", "ok");
+    await loadMemoryList();
   } catch (error) {
     conversation.messages[assistantDraftIndex].content = `Error: ${error.message}`;
     touchConversation(conversation);
     saveState();
     setStatus(`Chat error: ${error.message}`, "error");
   } finally {
+    isStreaming = false;
     sendBtn.disabled = false;
+    sendBtn.textContent = "Send";
     regenerateBtn.disabled = false;
     renderAll();
   }
@@ -803,6 +970,7 @@ checkConnectionBtn.addEventListener("click", checkConnection);
 newChatBtn.addEventListener("click", createConversation);
 renameChatBtn.addEventListener("click", renameActiveConversation);
 deleteChatBtn.addEventListener("click", deleteActiveConversation);
+refreshMemoryBtn.addEventListener("click", loadMemoryList);
 savePresetBtn.addEventListener("click", saveCurrentPromptAsPreset);
 deletePresetBtn.addEventListener("click", deleteSelectedPreset);
 exportJsonBtn.addEventListener("click", exportActiveConversationJson);
@@ -816,3 +984,4 @@ importJsonInput.addEventListener("change", async () => {
 
 renderAll();
 loadModels();
+loadMemoryList();
