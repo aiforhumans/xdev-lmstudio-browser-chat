@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>XDEV LM Studio Browser Chat</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="app">
+    <aside class="sidebar panel">
+      <div class="sidebar-header">
+        <h2>Chats</h2>
+        <button type="button" id="newChatBtn">New</button>
+      </div>
+      <div id="conversationList" class="conversation-list"></div>
+      <div class="sidebar-actions">
+        <button type="button" id="renameChatBtn">Rename</button>
+        <button type="button" id="deleteChatBtn">Delete</button>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar panel">
+        <div>
+          <h1>XDEV LM Studio Chat</h1>
+          <p>Simple local browser UI for chatting with LM Studio.</p>
+        </div>
+        <button id="checkConnectionBtn" type="button">Check API</button>
+      </header>
+
+      <section class="settings panel">
+        <label>
+          Model
+          <select id="modelSelect">
+            <option value="">Loading models...</option>
+          </select>
+        </label>
+
+        <label>
+          Temperature
+          <input id="temperatureInput" type="number" min="0" max="2" step="0.1" value="0.7" />
+        </label>
+
+        <label>
+          Max tokens
+          <input id="maxTokensInput" type="number" min="1" max="8192" step="1" value="512" />
+        </label>
+      </section>
+
+      <section class="prompt-tools panel">
+        <label class="system-prompt">
+          System prompt
+          <textarea id="systemPromptInput" rows="3"></textarea>
+        </label>
+        <div class="preset-controls">
+          <label>
+            Prompt preset
+            <select id="presetSelect"></select>
+          </label>
+          <div class="inline-actions">
+            <button id="savePresetBtn" type="button">Save Preset</button>
+            <button id="deletePresetBtn" type="button">Delete Preset</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="export-tools panel">
+        <button id="exportJsonBtn" type="button">Export JSON</button>
+        <button id="exportMdBtn" type="button">Export Markdown</button>
+        <label class="import-label" for="importJsonInput">Import JSON</label>
+        <input id="importJsonInput" type="file" accept="application/json" />
+      </section>
+
+      <section id="statusBox" class="status panel">Starting...</section>
+
+      <section id="chatBox" class="chat panel"></section>
+
+      <form id="chatForm" class="composer panel">
+        <textarea
+          id="messageInput"
+          placeholder="Type your message here..."
+          rows="3"
+        ></textarea>
+        <div class="composer-actions">
+          <button type="button" id="clearBtn">Clear</button>
+          <button type="button" id="regenerateBtn">Regenerate</button>
+          <button type="submit" id="sendBtn">Send</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
