@@ -12,6 +12,8 @@ A simple local browser UI for chatting with LM Studio through its OpenAI-compati
 - Per-model parameter profile memory
 - Markdown-friendly responses with code blocks + copy buttons
 - Export/import chat transcripts (JSON + Markdown)
+- Stateful chats (`response_id` / `previous_response_id`)
+- Streaming responses (LM Studio REST v1 SSE events)
 - Local Express backend proxy
 - No OpenAI key needed
 - Works with LM Studio running on `http://localhost:1234/v1`
@@ -27,7 +29,7 @@ The app calls:
 
 ```txt
 http://localhost:1234/v1/models
-http://localhost:1234/v1/chat/completions
+http://localhost:1234/api/v1/chat
 ```
 
 ## 2. Install the app

@@ -17,6 +17,7 @@ const clearBtn = document.getElementById("clearBtn");
 const regenerateBtn = document.getElementById("regenerateBtn");
 const checkConnectionBtn = document.getElementById("checkConnectionBtn");
 const conversationList = document.getElementById("conversationList");
+const chatCountBadge = document.getElementById("chatCountBadge");
 const newChatBtn = document.getElementById("newChatBtn");
 const renameChatBtn = document.getElementById("renameChatBtn");
 const deleteChatBtn = document.getElementById("deleteChatBtn");
@@ -41,6 +42,7 @@ function newConversation(title = "New Chat") {
     max_tokens: 512,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     messages: [],
+    responseIds: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -68,7 +70,14 @@ function loadState() {
     }
 
     const parsed = JSON.parse(raw);
-    const conversations = Array.isArray(parsed.conversations) ? parsed.conversations : [];
+    const conversations = Array.isArray(parsed.conversations)
+      ? parsed.conversations.map((conversation) => ({
+        ...newConversation(conversation.title || "Chat"),
+        ...conversation,
+        messages: Array.isArray(conversation.messages) ? conversation.messages : [],
+        responseIds: Array.isArray(conversation.responseIds) ? conversation.responseIds : [],
+      }))
+      : [];
     if (!conversations.length) {
       const initial = newConversation("Chat 1");
       return {
@@ -118,15 +127,33 @@ function conversationTitleFromMessage(text) {
   return normalized.slice(0, 40) || "New Chat";
 }
 
+function getLastResponseId(conversation) {
+  if (!conversation || !Array.isArray(conversation.responseIds) || !conversation.responseIds.length) {
+    return null;
+  }
+  return conversation.responseIds[conversation.responseIds.length - 1];
+}
+
 function renderConversationList() {
   conversationList.innerHTML = "";
   const sorted = [...state.conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  chatCountBadge.textContent = String(sorted.length);
 
   for (const conversation of sorted) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `conversation-item ${conversation.id === state.activeConversationId ? "active" : ""}`;
-    button.textContent = conversation.title || "Untitled Chat";
+
+    const title = document.createElement("span");
+    title.className = "conversation-item-title";
+    title.textContent = conversation.title || "Untitled Chat";
+
+    const meta = document.createElement("span");
+    meta.className = "conversation-item-meta";
+    meta.textContent = `${conversation.messages?.length || 0} msg`;
+
+    button.appendChild(title);
+    button.appendChild(meta);
     button.addEventListener("click", () => {
       state.activeConversationId = conversation.id;
       saveState();
@@ -363,13 +390,6 @@ async function checkConnection() {
   }
 }
 
-function composeMessagesForApi(conversation) {
-  return [
-    { role: "system", content: conversation.systemPrompt || DEFAULT_SYSTEM_PROMPT },
-    ...conversation.messages,
-  ];
-}
-
 async function sendMessage(userText) {
   const conversation = getActiveConversation();
   if (!conversation) return;
@@ -383,6 +403,8 @@ async function sendMessage(userText) {
   }
 
   conversation.messages.push({ role: "user", content: userText });
+  conversation.messages.push({ role: "assistant", content: "" });
+  const assistantDraftIndex = conversation.messages.length - 1;
   touchConversation(conversation);
   saveState();
   renderAll();
@@ -392,28 +414,134 @@ async function sendMessage(userText) {
   setStatus("Generating response...");
 
   try {
-    const response = await fetch("/api/chat", {
+    const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: conversation.model,
-        messages: composeMessagesForApi(conversation),
+        input: userText,
+        system_prompt: conversation.systemPrompt,
+        previous_response_id: getLastResponseId(conversation),
         temperature: conversation.temperature,
-        max_tokens: conversation.max_tokens,
+        max_output_tokens: conversation.max_tokens,
+        store: true,
       }),
     });
 
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
+    if (!response.ok) {
+      const data = await response.json();
       throw new Error(data.error || "Chat request failed");
     }
 
-    conversation.messages.push({ role: "assistant", content: data.message || "" });
+    if (!response.body) {
+      throw new Error("Streaming response had no body.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalMessage = "";
+    let finalResponseId = null;
+    let streamError = null;
+
+    function processEventBlock(block) {
+      const lines = block.split("\n");
+      let eventType = "message";
+      const dataLines = [];
+
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      }
+
+      if (!dataLines.length) return;
+
+      let payload;
+      try {
+        payload = JSON.parse(dataLines.join("\n"));
+      } catch {
+        return;
+      }
+
+      if (eventType === "message.delta" || payload.type === "message.delta") {
+        const delta = typeof payload.content === "string" ? payload.content : "";
+        if (delta) {
+          finalMessage += delta;
+          conversation.messages[assistantDraftIndex].content = finalMessage;
+          renderMessages();
+        }
+        return;
+      }
+
+      if (eventType === "chat.end" || payload.type === "chat.end") {
+        const result = payload.result || {};
+        const output = Array.isArray(result.output) ? result.output : [];
+        const messageFromOutput = output
+          .filter((item) => item?.type === "message" && typeof item?.content === "string")
+          .map((item) => item.content)
+          .join("");
+
+        if (!finalMessage && messageFromOutput) {
+          finalMessage = messageFromOutput;
+          conversation.messages[assistantDraftIndex].content = finalMessage;
+          renderMessages();
+        }
+
+        if (typeof result.response_id === "string" && result.response_id.startsWith("resp_")) {
+          finalResponseId = result.response_id;
+        }
+        return;
+      }
+
+      if (eventType === "error" || payload.type === "error") {
+        streamError = payload.error?.message || "Streaming request failed";
+        return;
+      }
+
+      if (payload.type === "model_load.progress" && typeof payload.progress === "number") {
+        setStatus(`Loading model... ${Math.round(payload.progress * 100)}%`);
+      } else if (payload.type === "prompt_processing.progress" && typeof payload.progress === "number") {
+        setStatus(`Processing prompt... ${Math.round(payload.progress * 100)}%`);
+      }
+    }
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+
+      let splitIndex = buffer.indexOf("\n\n");
+      while (splitIndex !== -1) {
+        const block = buffer.slice(0, splitIndex).trim();
+        buffer = buffer.slice(splitIndex + 2);
+        if (block) processEventBlock(block);
+        splitIndex = buffer.indexOf("\n\n");
+      }
+    }
+
+    const tail = buffer.trim();
+    if (tail) processEventBlock(tail);
+
+    if (streamError) {
+      throw new Error(streamError);
+    }
+
+    if (!conversation.messages[assistantDraftIndex].content && !finalMessage) {
+      conversation.messages[assistantDraftIndex].content = "No message content returned.";
+    }
+
+    if (finalResponseId) {
+      conversation.responseIds.push(finalResponseId);
+    }
+
     touchConversation(conversation);
     saveState();
     setStatus("Ready.", "ok");
   } catch (error) {
-    conversation.messages.push({ role: "assistant", content: `Error: ${error.message}` });
+    conversation.messages[assistantDraftIndex].content = `Error: ${error.message}`;
     touchConversation(conversation);
     saveState();
     setStatus(`Chat error: ${error.message}`, "error");
@@ -443,6 +571,9 @@ async function regenerateLastAssistantReply() {
 
   const userText = conversation.messages[lastUserIndex].content;
   conversation.messages.splice(lastUserIndex);
+  if (conversation.responseIds.length) {
+    conversation.responseIds.pop();
+  }
   touchConversation(conversation);
   saveState();
   renderAll();
@@ -615,6 +746,7 @@ async function importConversationFromFile(file) {
       role: item.role === "assistant" ? "assistant" : "user",
       content: String(item.content || ""),
     })),
+    responseIds: [],
     systemPrompt: String(conversation.systemPrompt || DEFAULT_SYSTEM_PROMPT),
     updatedAt: new Date().toISOString(),
   };
@@ -659,6 +791,7 @@ clearBtn.addEventListener("click", () => {
   const conversation = getActiveConversation();
   if (!conversation) return;
   conversation.messages = [];
+  conversation.responseIds = [];
   touchConversation(conversation);
   saveState();
   renderMessages();

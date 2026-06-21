@@ -10,7 +10,10 @@
   <main class="app">
     <aside class="sidebar panel">
       <div class="sidebar-header">
-        <h2>Chats</h2>
+        <div class="sidebar-title-row">
+          <h2>Chats</h2>
+          <span id="chatCountBadge" class="chat-count">0</span>
+        </div>
         <button type="button" id="newChatBtn">New</button>
       </div>
       <div id="conversationList" class="conversation-list"></div>
@@ -22,9 +25,9 @@
 
     <section class="main">
       <header class="topbar panel">
-        <div>
+        <div class="title-block">
           <h1>XDEV LM Studio Chat</h1>
-          <p>Simple local browser UI for chatting with LM Studio.</p>
+          <span class="subtitle">Local browser UI for LM Studio</span>
         </div>
         <button id="checkConnectionBtn" type="button">Check API</button>
       </header>

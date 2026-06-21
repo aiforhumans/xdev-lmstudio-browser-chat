@@ -8,6 +8,10 @@ const app = express();
 const APP_PORT = Number(process.env.APP_PORT || 3000);
 const LM_STUDIO_BASE_URL = process.env.LM_STUDIO_BASE_URL || "http://localhost:1234/v1";
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL || "";
+const OPENAI_COMPAT_BASE_URL = LM_STUDIO_BASE_URL.endsWith("/v1")
+  ? LM_STUDIO_BASE_URL
+  : `${LM_STUDIO_BASE_URL}/v1`;
+const REST_V1_BASE_URL = OPENAI_COMPAT_BASE_URL.replace(/\/v1\/?$/, "/api/v1");
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
@@ -17,15 +21,43 @@ function getErrorMessage(error) {
   return String(error);
 }
 
+function getSelectedModel(requestModel) {
+  return requestModel || DEFAULT_MODEL;
+}
+
+function getLastUserMessage(messages) {
+  if (!Array.isArray(messages)) return "";
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user" && typeof messages[index]?.content === "string") {
+      return messages[index].content;
+    }
+  }
+  return "";
+}
+
+function getSystemPrompt(messages) {
+  if (!Array.isArray(messages)) return "";
+  const system = messages.find((message) => message?.role === "system" && typeof message?.content === "string");
+  return system?.content || "";
+}
+
+function getMessageFromRestV1Output(output) {
+  if (!Array.isArray(output)) return "";
+  return output
+    .filter((item) => item?.type === "message" && typeof item?.content === "string")
+    .map((item) => item.content)
+    .join("");
+}
+
 app.get("/api/health", async (_req, res) => {
   try {
-    const response = await fetch(`${LM_STUDIO_BASE_URL}/models`);
+    const response = await fetch(`${OPENAI_COMPAT_BASE_URL}/models`);
 
     if (!response.ok) {
       return res.status(502).json({
         ok: false,
         message: `LM Studio responded with HTTP ${response.status}`,
-        lmStudioBaseUrl: LM_STUDIO_BASE_URL,
+        lmStudioBaseUrl: OPENAI_COMPAT_BASE_URL,
       });
     }
 
@@ -34,7 +66,7 @@ app.get("/api/health", async (_req, res) => {
     res.json({
       ok: true,
       message: "Connected to LM Studio",
-      lmStudioBaseUrl: LM_STUDIO_BASE_URL,
+      lmStudioBaseUrl: OPENAI_COMPAT_BASE_URL,
       defaultModel: DEFAULT_MODEL,
       models: data.data || [],
     });
@@ -43,14 +75,14 @@ app.get("/api/health", async (_req, res) => {
       ok: false,
       message: "Could not connect to LM Studio",
       error: getErrorMessage(error),
-      lmStudioBaseUrl: LM_STUDIO_BASE_URL,
+      lmStudioBaseUrl: OPENAI_COMPAT_BASE_URL,
     });
   }
 });
 
 app.get("/api/models", async (_req, res) => {
   try {
-    const response = await fetch(`${LM_STUDIO_BASE_URL}/models`);
+    const response = await fetch(`${OPENAI_COMPAT_BASE_URL}/models`);
 
     if (!response.ok) {
       const text = await response.text();
@@ -79,19 +111,25 @@ app.post("/api/chat", async (req, res) => {
   try {
     const {
       model,
+      input,
+      system_prompt,
+      previous_response_id,
       messages,
       temperature = 0.7,
       max_tokens = 512,
+      store = true,
     } = req.body;
 
-    if (!Array.isArray(messages)) {
+    const selectedModel = getSelectedModel(model);
+    const finalInput = typeof input === "string" ? input : getLastUserMessage(messages);
+    const finalSystemPrompt = typeof system_prompt === "string" ? system_prompt : getSystemPrompt(messages);
+
+    if (!finalInput) {
       return res.status(400).json({
         ok: false,
-        error: "messages must be an array",
+        error: "input is required (or include a user message in messages).",
       });
     }
-
-    const selectedModel = model || DEFAULT_MODEL;
 
     if (!selectedModel) {
       return res.status(400).json({
@@ -100,16 +138,19 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    const response = await fetch(`${LM_STUDIO_BASE_URL}/chat/completions`, {
+    const response = await fetch(`${REST_V1_BASE_URL}/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: selectedModel,
-        messages,
+        input: finalInput,
+        system_prompt: finalSystemPrompt || undefined,
+        previous_response_id: previous_response_id || undefined,
         temperature,
-        max_tokens,
+        max_output_tokens: max_tokens,
+        store: Boolean(store),
       }),
     });
 
@@ -123,11 +164,13 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const data = JSON.parse(text);
-    const assistantMessage = data.choices?.[0]?.message?.content || "";
+    const assistantMessage = getMessageFromRestV1Output(data.output);
 
     res.json({
       ok: true,
       message: assistantMessage,
+      response_id: data.response_id || null,
+      stats: data.stats || null,
       raw: data,
     });
   } catch (error) {
@@ -138,12 +181,104 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+app.post("/api/chat/stream", async (req, res) => {
+  try {
+    const {
+      model,
+      input,
+      system_prompt,
+      previous_response_id,
+      temperature = 0.7,
+      max_output_tokens = 512,
+      store = true,
+    } = req.body;
+
+    const selectedModel = getSelectedModel(model);
+
+    if (!selectedModel) {
+      return res.status(400).json({
+        ok: false,
+        error: "No model selected. Choose a model in the UI or set DEFAULT_MODEL in .env.",
+      });
+    }
+
+    if (typeof input !== "string" || !input.trim()) {
+      return res.status(400).json({
+        ok: false,
+        error: "input must be a non-empty string",
+      });
+    }
+
+    const upstream = await fetch(`${REST_V1_BASE_URL}/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        input,
+        system_prompt: typeof system_prompt === "string" ? system_prompt : undefined,
+        previous_response_id: previous_response_id || undefined,
+        temperature,
+        max_output_tokens,
+        store: Boolean(store),
+        stream: true,
+      }),
+    });
+
+    if (!upstream.ok) {
+      const errorText = await upstream.text();
+      return res.status(upstream.status).json({
+        ok: false,
+        error: errorText,
+      });
+    }
+
+    if (!upstream.body) {
+      return res.status(502).json({
+        ok: false,
+        error: "LM Studio returned no response body for streaming request.",
+      });
+    }
+
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(decoder.decode(value, { stream: true }));
+    }
+
+    res.end();
+  } catch (error) {
+    const message = getErrorMessage(error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        ok: false,
+        error: message,
+      });
+      return;
+    }
+
+    res.write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "unknown", message } })}\n\n`);
+    res.end();
+  }
+});
+
 app.listen(APP_PORT, () => {
   console.log("");
   console.log("XDEV LM Studio Browser Chat");
   console.log("---------------------------");
   console.log(`Browser UI:        http://localhost:${APP_PORT}`);
-  console.log(`LM Studio API:     ${LM_STUDIO_BASE_URL}`);
+  console.log(`LM OpenAI API:     ${OPENAI_COMPAT_BASE_URL}`);
+  console.log(`LM REST v1 API:    ${REST_V1_BASE_URL}`);
   console.log("");
   console.log("Make sure LM Studio local server is running.");
   console.log("");
